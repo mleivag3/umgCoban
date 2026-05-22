@@ -22,7 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: dashboard.php');
         exit;
     }
-    $error = 'Usuario o contraseña incorrectos.';
+    $error = 'Usuario o contrasena incorrectos.';
 }
 ?>
 <!DOCTYPE html>
@@ -58,13 +58,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       align-items: center;
       justify-content: center;
       width: 56px; height: 56px;
-      background: linear-gradient(135deg,#3b82f6,#1d4ed8);
+      background: linear-gradient(135deg,#10b981,#059669);
       border-radius: 14px;
       font-size: 28px;
       margin-bottom: 12px;
     }
     .logo h1 { font-size: 22px; color: #0f172a; font-weight: 700; }
     .logo p  { font-size: 13px; color: #64748b; margin-top: 4px; }
+    .badge-new {
+      display: inline-block;
+      background: #dcfce7; color: #16a34a;
+      font-size: 11px; font-weight: 700;
+      padding: 2px 8px; border-radius: 20px;
+      margin-top: 6px;
+    }
     .form-group { margin-bottom: 18px; }
     label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px; }
     input[type=text], input[type=password] {
@@ -74,10 +81,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       transition: border-color .2s;
       outline: none;
     }
-    input:focus { border-color: #3b82f6; }
+    input:focus { border-color: #10b981; }
     .btn {
       width: 100%; padding: 12px;
-      background: linear-gradient(135deg,#3b82f6,#1d4ed8);
+      background: linear-gradient(135deg,#10b981,#059669);
       color: #fff; border: none; border-radius: 8px;
       font-size: 15px; font-weight: 600; cursor: pointer;
       transition: opacity .2s;
@@ -105,6 +112,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <div class="logo-icon">&#128640;</div>
       <h1><?= APP_NAME ?></h1>
       <p>Pipeline CI/CD Demo</p>
+      <span class="badge-new">&#10003; Deploy automatico activo</span>
     </div>
 
     <?php if ($error): ?>
@@ -120,7 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       </div>
       <div class="form-group">
         <label for="password">Contrasena</label>
-        <input type="password" id="password" name="password" placeholder="••••••••" required>
+        <input type="password" id="password" name="password" placeholder="********" required>
       </div>
       <button type="submit" class="btn">Iniciar sesion</button>
     </form>
