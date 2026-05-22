@@ -4,10 +4,10 @@ require_login();
 $user = current_user();
 
 $stats = [
-    ['label' => 'Deploys hoy',      'value' => '12',   'delta' => '+3',  'color' => '#3b82f6', 'icon' => '&#128640;'],
-    ['label' => 'Tests pasados',    'value' => '248',  'delta' => '+18', 'color' => '#10b981', 'icon' => '&#9989;'],
-    ['label' => 'Builds exitosos',  'value' => '97%',  'delta' => '+2%', 'color' => '#8b5cf6', 'icon' => '&#127959;'],
-    ['label' => 'Tiempo promedio',  'value' => '1m42s','delta' => '-8s', 'color' => '#f59e0b', 'icon' => '&#9201;'],
+    ['label' => 'Deploys hoy',      'value' => '15',   'delta' => '+6',  'color' => '#3b82f6', 'icon' => '&#128640;'],
+    ['label' => 'Tests pasados',    'value' => '301',  'delta' => '+53', 'color' => '#10b981', 'icon' => '&#9989;'],
+    ['label' => 'Builds exitosos',  'value' => '99%',  'delta' => '+2%', 'color' => '#8b5cf6', 'icon' => '&#127959;'],
+    ['label' => 'Tiempo promedio',  'value' => '1m10s','delta' => '-32s','color' => '#f59e0b', 'icon' => '&#9201;'],
 ];
 
 $pipelines = [
