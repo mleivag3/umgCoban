@@ -198,58 +198,48 @@ jobs:
           DH_USER:      ${{ secrets.DOCKERHUB_USERNAME }}
           DH_TOKEN:     ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
-          sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" \
-            APP_VERSION="$APP_VERSION" DH_USER="$DH_USER" DH_TOKEN="$DH_TOKEN" \
-            bash << 'ENDSSH'
+          sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" bash -s << EOF
             set -e
-            cd ~/php-cicd-demo
+            cd /root/php-cicd-demo
 
             echo "=== Login a Docker Hub ==="
             echo "$DH_TOKEN" | docker login -u "$DH_USER" --password-stdin
 
             echo "=== Guardando version actual para rollback ==="
-            CURRENT=$(docker inspect php-cicd-demo \
+            CURRENT=\$(docker inspect php-cicd-demo \
               --format='{{index .Config.Image}}' 2>/dev/null || echo "none")
-            echo "Version actual: $CURRENT"
-            echo "$CURRENT" > /tmp/rollback_image.txt
+            echo "Version actual: \$CURRENT"
+            echo "\$CURRENT" > /tmp/rollback_image.txt
 
             echo "=== Descargando nueva imagen ==="
-            docker compose pull
+            APP_VERSION="$APP_VERSION" DOCKERHUB_USERNAME="$DH_USER" docker compose pull
 
             echo "=== Aplicando nuevo deploy ==="
-            APP_VERSION=$APP_VERSION DOCKERHUB_USERNAME=$DH_USER \
+            APP_VERSION="$APP_VERSION" DOCKERHUB_USERNAME="$DH_USER" \
               docker compose up -d --remove-orphans
 
-            echo "=== Verificando salud del contenedor (15s) ==="
+            echo "=== Verificando salud (15s) ==="
             sleep 15
-            STATUS=$(docker inspect php-cicd-demo \
-              --format='{{.State.Health.Status}}' 2>/dev/null || echo "unknown")
-            HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ || echo "000")
+            HTTP=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ || echo "000")
+            echo "HTTP: \$HTTP"
 
-            echo "Health: $STATUS | HTTP: $HTTP"
-
-            if [ "$HTTP" != "200" ]; then
-              echo ""
-              echo "DEPLOY FALLO (HTTP $HTTP) — ejecutando rollback..."
-              ROLLBACK=$(cat /tmp/rollback_image.txt)
-
-              if [ "$ROLLBACK" != "none" ]; then
+            if [ "\$HTTP" != "200" ]; then
+              echo "DEPLOY FALLO (HTTP \$HTTP) — ejecutando rollback..."
+              ROLLBACK=\$(cat /tmp/rollback_image.txt)
+              if [ "\$ROLLBACK" != "none" ] && [ -n "\$ROLLBACK" ]; then
                 docker stop php-cicd-demo 2>/dev/null || true
                 docker rm   php-cicd-demo 2>/dev/null || true
                 docker run -d --name php-cicd-demo --restart unless-stopped \
-                  -p 8080:80 "$ROLLBACK"
-                echo "Rollback aplicado: $ROLLBACK"
-              else
-                echo "No habia version anterior para rollback."
+                  -p 8080:80 "\$ROLLBACK"
+                echo "Rollback aplicado: \$ROLLBACK"
               fi
               exit 1
             fi
 
-            echo ""
-            echo "Deploy exitoso - version: $APP_VERSION | HTTP: $HTTP"
+            echo "Deploy exitoso — version: $APP_VERSION | HTTP: \$HTTP"
             docker ps --filter name=php-cicd-demo \
               --format 'Contenedor: {{.Names}} | {{.Status}}'
-          ENDSSH
+          EOF
 
       - name: Resumen del deploy
         if: always()
