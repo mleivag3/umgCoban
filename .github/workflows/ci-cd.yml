@@ -48,7 +48,7 @@ jobs:
           SQL=$(grep -rn --include="*.php" "SELECT\|INSERT\|UPDATE\|DELETE" src/ | grep '\$')
           XSS=$(grep -rn --include="*.php" "echo \$" src/ | grep -v "htmlspecialchars\|htmlentities\|strip_tags")
           PWD=$(grep -rn --include="*.php" -i "password\s*=" src/ | grep '"' | grep -v "USERS\|getenv\|password_verify\|password_hash")
-          GET=$(grep -rn --include="*.php" '\$_GET\[\|\$_POST\[\|\$_REQUEST\[' src/)
+          GET=$(grep -rn --include="*.php" -E '\$[a-z_]+ *= *\$_(GET|POST|REQUEST)\[' src/)
 
           echo "SQL matches: $SQL"
           echo "XSS matches: $XSS"
