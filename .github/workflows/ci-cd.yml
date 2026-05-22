@@ -113,19 +113,20 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ "$STATUS" = "FAIL" ]; then
-            echo "### ❌ Problemas detectados" >> $GITHUB_STEP_SUMMARY
+            echo "### ❌ Problemas detectados — build detenido" >> $GITHUB_STEP_SUMMARY
             echo "$ISSUES" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Resumen:** $SUMMARY" >> $GITHUB_STEP_SUMMARY
+            echo "---" >> $GITHUB_STEP_SUMMARY
+            echo "> ⛔ El build fue detenido por el AI Code Reviewer. Corrige los problemas y vuelve a hacer push." >> $GITHUB_STEP_SUMMARY
             echo ""
-            echo "::warning::AI Review detecto problemas: $SUMMARY"
-            echo "result=FAIL" >> $GITHUB_OUTPUT
+            echo "::error::AI Review detecto problemas criticos: $SUMMARY"
+            exit 1
           else
-            echo "### ✅ Codigo aprobado" >> $GITHUB_STEP_SUMMARY
+            echo "### ✅ Codigo aprobado — build continua" >> $GITHUB_STEP_SUMMARY
             echo "**Resumen:** $SUMMARY" >> $GITHUB_STEP_SUMMARY
             echo ""
             echo "✅ AI Review: codigo aprobado"
-            echo "result=PASS" >> $GITHUB_OUTPUT
           fi
 
   # ─── 3. BUILD & PUSH ──────────────────────────────────────────────────────────
