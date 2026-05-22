@@ -46,85 +46,80 @@ jobs:
 
           if [ -z "$CHANGED" ]; then
             echo "No hay archivos PHP modificados."
-            echo "result=PASS" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           echo "Archivos a revisar: $CHANGED"
 
-          # Concatenar contenido de los archivos PHP cambiados
-          CODE=""
+          # ── FASE 1: Deteccion deterministica por patrones (bash) ─────────────
+          ISSUES_LIST=""
+          HAS_ISSUES=0
+
           for f in $CHANGED; do
-            if [ -f "$f" ]; then
-              CODE="$CODE\n\n// Archivo: $f\n$(cat $f)"
+            [ -f "$f" ] || continue
+
+            # SQL Injection: query con variable concatenada
+            if grep -Pn 'SELECT|INSERT|UPDATE|DELETE' "$f" | grep -qP '\$[a-zA-Z_]'; then
+              ISSUES_LIST="$ISSUES_LIST\n  - **SQL Injection** en \`$f\`: query construida con variables sin preparar"
+              HAS_ISSUES=1
+            fi
+
+            # XSS: echo directo de variable sin htmlspecialchars
+            if grep -Pn 'echo\s+\$' "$f" | grep -qvP 'htmlspecialchars|htmlentities|strip_tags|intval'; then
+              ISSUES_LIST="$ISSUES_LIST\n  - **XSS** en \`$f\`: echo de variable sin sanitizar"
+              HAS_ISSUES=1
+            fi
+
+            # Password hardcodeada
+            if grep -Pni '(password|passwd|pwd|secret)\s*=\s*["\x27][^"'\'']{4,}["\x27]' "$f" | grep -qvP 'getenv|define.*USERS'; then
+              ISSUES_LIST="$ISSUES_LIST\n  - **Password hardcodeada** en \`$f\`: credencial en texto plano"
+              HAS_ISSUES=1
+            fi
+
+            # $_GET / $_POST sin validar (asignacion directa)
+            if grep -Pn '\$\w+\s*=\s*\$_(GET|POST|REQUEST)\[' "$f"; then
+              ISSUES_LIST="$ISSUES_LIST\n  - **Input sin validar** en \`$f\`: uso directo de \$_GET o \$_POST"
+              HAS_ISSUES=1
             fi
           done
 
-          # Prompt directo para el modelo pequeno
-          PROMPT="Eres un analizador de seguridad PHP. Revisa este codigo y busca SOLO estos problemas criticos:
-          1. SQL Injection (variables de usuario en queries sin preparar)
-          2. XSS (echo de variables sin htmlspecialchars)
-          3. Passwords hardcodeadas en el codigo
-          4. Uso directo de \$_GET o \$_POST sin validar
+          # ── FASE 2: Ollama genera el resumen narrativo ────────────────────────
+          CODE=""
+          for f in $CHANGED; do
+            [ -f "$f" ] && CODE="$CODE\n// $f\n$(head -30 $f)\n"
+          done
 
-          Responde UNICAMENTE con este JSON sin texto extra:
-          {\"status\":\"PASS\",\"issues\":[],\"summary\":\"ok\"}
-          o
-          {\"status\":\"FAIL\",\"issues\":[\"descripcion del problema\"],\"summary\":\"resumen\"}
+          OLLAMA_PROMPT="Eres un asistente de seguridad. Lista en 1-2 oraciones los principales riesgos de seguridad que ves en este codigo PHP. Se breve y directo:\n\n$CODE"
 
-          Codigo:
-          $CODE"
-
-          # Llamar a Ollama
-          RESPONSE=$(curl -s -X POST http://213.199.37.66:11434/api/generate \
+          OLLAMA_SUMMARY=$(curl -s -X POST http://213.199.37.66:11434/api/generate \
             -H "Content-Type: application/json" \
-            -d "{\"model\":\"qwen2.5:0.5b\",\"prompt\":$(echo "$PROMPT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),\"stream\":false}" \
-            --max-time 60)
+            -d "{\"model\":\"qwen2.5:0.5b\",\"prompt\":$(echo "$OLLAMA_PROMPT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),\"stream\":false}" \
+            --max-time 45 \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('response','Sin respuesta de Ollama')[:300])" 2>/dev/null \
+            || echo "Ollama no disponible — deteccion basada en patrones")
 
-          echo "Respuesta raw de Ollama:"
-          echo "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('response',''))"
+          echo "Ollama dice: $OLLAMA_SUMMARY"
 
-          # Extraer JSON de la respuesta
-          REVIEW=$(echo "$RESPONSE" | python3 -c "
-          import json, sys, re
-          d = json.load(sys.stdin)
-          raw = d.get('response','')
-          # Buscar JSON en la respuesta
-          match = re.search(r'\{.*\}', raw, re.DOTALL)
-          if match:
-              try:
-                  obj = json.loads(match.group())
-                  print(json.dumps(obj))
-              except:
-                  print('{\"status\":\"PASS\",\"issues\":[],\"summary\":\"No se pudo parsear respuesta\"}')
-          else:
-              print('{\"status\":\"PASS\",\"issues\":[],\"summary\":\"Sin problemas detectados\"}')
-          ")
-
-          STATUS=$(echo "$REVIEW" | python3 -c "import json,sys; print(json.load(sys.stdin).get('status','PASS'))")
-          SUMMARY=$(echo "$REVIEW" | python3 -c "import json,sys; print(json.load(sys.stdin).get('summary',''))")
-          ISSUES=$(echo "$REVIEW"  | python3 -c "import json,sys; issues=json.load(sys.stdin).get('issues',[]); [print(f'  - {i}') for i in issues]")
-
-          # Escribir resumen en GitHub Actions Summary
-          echo "## 🤖 AI Code Review — Ollama (qwen2.5)" >> $GITHUB_STEP_SUMMARY
+          # ── FASE 3: Escribir GitHub Step Summary ─────────────────────────────
+          echo "## 🤖 AI Code Review — Ollama + Pattern Scanner" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Modelo:** qwen2.5:0.5b" >> $GITHUB_STEP_SUMMARY
-          echo "**Archivos revisados:** $CHANGED" >> $GITHUB_STEP_SUMMARY
+          echo "**Modelo:** qwen2.5:0.5b  |  **Archivos:** $CHANGED" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 💬 Analisis Ollama" >> $GITHUB_STEP_SUMMARY
+          echo "$OLLAMA_SUMMARY" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ "$STATUS" = "FAIL" ]; then
-            echo "### ❌ Problemas detectados — build detenido" >> $GITHUB_STEP_SUMMARY
-            echo "$ISSUES" >> $GITHUB_STEP_SUMMARY
+          if [ "$HAS_ISSUES" = "1" ]; then
+            echo "### ❌ Problemas criticos detectados — build detenido" >> $GITHUB_STEP_SUMMARY
+            echo -e "$ISSUES_LIST" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Resumen:** $SUMMARY" >> $GITHUB_STEP_SUMMARY
             echo "---" >> $GITHUB_STEP_SUMMARY
-            echo "> ⛔ El build fue detenido por el AI Code Reviewer. Corrige los problemas y vuelve a hacer push." >> $GITHUB_STEP_SUMMARY
+            echo "> ⛔ Corrige los problemas de seguridad y vuelve a hacer push." >> $GITHUB_STEP_SUMMARY
             echo ""
-            echo "::error::AI Review detecto problemas criticos: $SUMMARY"
+            echo "::error::AI Review detecto problemas criticos de seguridad en el codigo PHP"
             exit 1
           else
-            echo "### ✅ Codigo aprobado — build continua" >> $GITHUB_STEP_SUMMARY
-            echo "**Resumen:** $SUMMARY" >> $GITHUB_STEP_SUMMARY
+            echo "### ✅ Sin problemas criticos — build continua" >> $GITHUB_STEP_SUMMARY
             echo ""
             echo "✅ AI Review: codigo aprobado"
           fi
