@@ -1,6 +1,6 @@
 services:
   app:
-    image: cdcd/php-cicd-demo:${APP_VERSION:-latest}
+    image: ${DOCKERHUB_USERNAME:-mi-usuario}/php-cicd-demo:${APP_VERSION:-latest}
     container_name: php-cicd-demo
     restart: unless-stopped
     ports:
