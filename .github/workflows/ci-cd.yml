@@ -41,87 +41,62 @@ jobs:
       - name: Verificar codigo PHP con Ollama
         id: ollama
         run: |
-          # Obtener archivos PHP modificados en este commit
-          CHANGED=$(git diff --name-only HEAD~1 HEAD -- '*.php' 2>/dev/null || git ls-files src/*.php)
+          set +e   # no salir automaticamente en error de grep
+          echo "=== Escaneando src/ en busca de vulnerabilidades ==="
 
-          if [ -z "$CHANGED" ]; then
-            echo "No hay archivos PHP modificados."
-            exit 0
-          fi
+          # ── Busqueda de patrones inseguros en TODOS los PHP de src/ ──────────
+          SQL=$(grep -rn --include="*.php" "SELECT\|INSERT\|UPDATE\|DELETE" src/ | grep '\$')
+          XSS=$(grep -rn --include="*.php" "echo \$" src/ | grep -v "htmlspecialchars\|htmlentities\|strip_tags")
+          PWD=$(grep -rn --include="*.php" -i "password\s*=" src/ | grep '"' | grep -v "USERS\|getenv\|password_verify\|password_hash")
+          GET=$(grep -rn --include="*.php" '\$_GET\[\|\$_POST\[\|\$_REQUEST\[' src/)
 
-          echo "Archivos a revisar: $CHANGED"
+          echo "SQL matches: $SQL"
+          echo "XSS matches: $XSS"
+          echo "PWD matches: $PWD"
+          echo "GET matches: $GET"
 
-          # ── FASE 1: Deteccion deterministica por patrones (bash) ─────────────
-          ISSUES_LIST=""
-          HAS_ISSUES=0
+          FAIL=0
+          [ -n "$SQL" ] && FAIL=1
+          [ -n "$XSS" ] && FAIL=1
+          [ -n "$PWD" ] && FAIL=1
+          [ -n "$GET" ] && FAIL=1
 
-          for f in $CHANGED; do
-            [ -f "$f" ] || continue
-
-            # SQL Injection: query con variable concatenada
-            if grep -Pn 'SELECT|INSERT|UPDATE|DELETE' "$f" | grep -qP '\$[a-zA-Z_]'; then
-              ISSUES_LIST="$ISSUES_LIST\n  - **SQL Injection** en \`$f\`: query construida con variables sin preparar"
-              HAS_ISSUES=1
-            fi
-
-            # XSS: echo directo de variable sin htmlspecialchars
-            if grep -Pn 'echo\s+\$' "$f" | grep -qvP 'htmlspecialchars|htmlentities|strip_tags|intval'; then
-              ISSUES_LIST="$ISSUES_LIST\n  - **XSS** en \`$f\`: echo de variable sin sanitizar"
-              HAS_ISSUES=1
-            fi
-
-            # Password hardcodeada
-            if grep -Pni '(password|passwd|pwd|secret)\s*=\s*["\x27][^"'\'']{4,}["\x27]' "$f" | grep -qvP 'getenv|define.*USERS'; then
-              ISSUES_LIST="$ISSUES_LIST\n  - **Password hardcodeada** en \`$f\`: credencial en texto plano"
-              HAS_ISSUES=1
-            fi
-
-            # $_GET / $_POST sin validar (asignacion directa)
-            if grep -Pn '\$\w+\s*=\s*\$_(GET|POST|REQUEST)\[' "$f"; then
-              ISSUES_LIST="$ISSUES_LIST\n  - **Input sin validar** en \`$f\`: uso directo de \$_GET o \$_POST"
-              HAS_ISSUES=1
-            fi
-          done
-
-          # ── FASE 2: Ollama genera el resumen narrativo ────────────────────────
-          CODE=""
-          for f in $CHANGED; do
-            [ -f "$f" ] && CODE="$CODE\n// $f\n$(head -30 $f)\n"
-          done
-
-          OLLAMA_PROMPT="Eres un asistente de seguridad. Lista en 1-2 oraciones los principales riesgos de seguridad que ves en este codigo PHP. Se breve y directo:\n\n$CODE"
-
-          OLLAMA_SUMMARY=$(curl -s -X POST http://213.199.37.66:11434/api/generate \
+          # ── Ollama: resumen narrativo del codigo ─────────────────────────────
+          CODE=$(head -25 src/config.php 2>/dev/null || echo "sin codigo")
+          OLLAMA_SUMMARY=$(curl -s --max-time 40 -X POST http://213.199.37.66:11434/api/generate \
             -H "Content-Type: application/json" \
-            -d "{\"model\":\"qwen2.5:0.5b\",\"prompt\":$(echo "$OLLAMA_PROMPT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),\"stream\":false}" \
-            --max-time 45 \
-            | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('response','Sin respuesta de Ollama')[:300])" 2>/dev/null \
-            || echo "Ollama no disponible — deteccion basada en patrones")
+            -d "{\"model\":\"qwen2.5:0.5b\",\"prompt\":\"List security vulnerabilities in this PHP code in 2 sentences max:\\n$CODE\",\"stream\":false}" \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('response','')[:250])" 2>/dev/null \
+            || echo "Ollama no disponible")
 
-          echo "Ollama dice: $OLLAMA_SUMMARY"
-
-          # ── FASE 3: Escribir GitHub Step Summary ─────────────────────────────
-          echo "## 🤖 AI Code Review — Ollama + Pattern Scanner" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Modelo:** qwen2.5:0.5b  |  **Archivos:** $CHANGED" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 💬 Analisis Ollama" >> $GITHUB_STEP_SUMMARY
-          echo "$OLLAMA_SUMMARY" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [ "$HAS_ISSUES" = "1" ]; then
-            echo "### ❌ Problemas criticos detectados — build detenido" >> $GITHUB_STEP_SUMMARY
-            echo -e "$ISSUES_LIST" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "---" >> $GITHUB_STEP_SUMMARY
-            echo "> ⛔ Corrige los problemas de seguridad y vuelve a hacer push." >> $GITHUB_STEP_SUMMARY
+          # ── GitHub Step Summary ───────────────────────────────────────────────
+          {
+            echo "## AI Code Review - Ollama + Scanner"
             echo ""
-            echo "::error::AI Review detecto problemas criticos de seguridad en el codigo PHP"
+            echo "**Modelo:** qwen2.5:0.5b"
+            echo ""
+            echo "### Analisis Ollama"
+            echo "$OLLAMA_SUMMARY"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$FAIL" = "1" ]; then
+            {
+              echo "### FAIL - Problemas criticos detectados"
+              echo ""
+              [ -n "$SQL" ] && echo "- **SQL Injection:** $SQL"
+              [ -n "$XSS" ] && echo "- **XSS:** $XSS"
+              [ -n "$PWD" ] && echo "- **Password hardcodeada:** $PWD"
+              [ -n "$GET" ] && echo "- **Input sin validar:** $GET"
+              echo ""
+              echo "> Build detenido. Corrige los problemas y vuelve a hacer push."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo ""
+            echo "::error::AI Review - se detectaron vulnerabilidades criticas en el codigo PHP"
             exit 1
           else
-            echo "### ✅ Sin problemas criticos — build continua" >> $GITHUB_STEP_SUMMARY
-            echo ""
-            echo "✅ AI Review: codigo aprobado"
+            echo "### PASS - Codigo aprobado" >> "$GITHUB_STEP_SUMMARY"
+            echo "AI Review: codigo aprobado - build continua"
           fi
 
   # ─── 3. BUILD & PUSH ──────────────────────────────────────────────────────────
