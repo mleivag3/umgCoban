@@ -196,10 +196,16 @@ jobs:
           SSH_HOST:     ${{ secrets.SSH_HOST }}
           APP_VERSION:  ${{ needs.build.outputs.image_version }}
           DH_USER:      ${{ secrets.DOCKERHUB_USERNAME }}
+          DH_TOKEN:     ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
-          sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" << 'ENDSSH'
+          sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" \
+            APP_VERSION="$APP_VERSION" DH_USER="$DH_USER" DH_TOKEN="$DH_TOKEN" \
+            bash << 'ENDSSH'
             set -e
             cd ~/php-cicd-demo
+
+            echo "=== Login a Docker Hub ==="
+            echo "$DH_TOKEN" | docker login -u "$DH_USER" --password-stdin
 
             echo "=== Guardando version actual para rollback ==="
             CURRENT=$(docker inspect php-cicd-demo \
