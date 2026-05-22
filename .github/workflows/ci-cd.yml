@@ -209,6 +209,10 @@ jobs:
             echo \$CURRENT > /tmp/rollback_image.txt
             echo \"Version anterior: \$CURRENT\"
 
+            echo '--- Eliminando contenedor anterior si existe ---'
+            docker stop php-cicd-demo 2>/dev/null || true
+            docker rm   php-cicd-demo 2>/dev/null || true
+
             echo '--- Pull nueva imagen (repo publico, sin login) ---'
             APP_VERSION=${APP_VERSION} DOCKERHUB_USERNAME=${DH_USER} docker compose pull
 
