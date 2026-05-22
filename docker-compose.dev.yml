@@ -1,0 +1,15 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        APP_VERSION: dev
+        BUILD_DATE: ${BUILD_DATE:-local}
+    container_name: php-cicd-demo-dev
+    ports:
+      - "8080:80"
+    volumes:
+      - ./src:/var/www/html
+    environment:
+      - APP_VERSION=dev
+      - BUILD_DATE=local

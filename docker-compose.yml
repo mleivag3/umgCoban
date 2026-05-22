@@ -1,0 +1,10 @@
+services:
+  app:
+    image: ghcr.io/${GITHUB_REPOSITORY:-php-cicd-demo}:latest
+    container_name: php-cicd-demo
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      - APP_VERSION=${APP_VERSION:-1.0.0}
+      - BUILD_DATE=${BUILD_DATE:-unknown}
