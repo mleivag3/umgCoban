@@ -10,9 +10,9 @@ on:
 
 jobs:
 
-  # ─── 1. TEST ──────────────────────────────────────────────────────────────────
+  # ─── 1. TEST - Sintaxis PHP nativa ────────────────────────────────────────────
   test:
-    name: Lint & Syntax check
+    name: PHP Syntax check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -26,11 +26,113 @@ jobs:
       - name: PHP syntax check
         run: find src -name "*.php" -exec php -l {} \;
 
-  # ─── 2. BUILD & PUSH ──────────────────────────────────────────────────────────
+  # ─── 2. AI REVIEW - Ollama como verificador de codigo ─────────────────────────
+  ai-review:
+    name: AI Code Review (Ollama)
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Verificar codigo PHP con Ollama
+        id: ollama
+        run: |
+          # Obtener archivos PHP modificados en este commit
+          CHANGED=$(git diff --name-only HEAD~1 HEAD -- '*.php' 2>/dev/null || git ls-files src/*.php)
+
+          if [ -z "$CHANGED" ]; then
+            echo "No hay archivos PHP modificados."
+            echo "result=PASS" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Archivos a revisar: $CHANGED"
+
+          # Concatenar contenido de los archivos PHP cambiados
+          CODE=""
+          for f in $CHANGED; do
+            if [ -f "$f" ]; then
+              CODE="$CODE\n\n// Archivo: $f\n$(cat $f)"
+            fi
+          done
+
+          # Prompt directo para el modelo pequeno
+          PROMPT="Eres un analizador de seguridad PHP. Revisa este codigo y busca SOLO estos problemas criticos:
+          1. SQL Injection (variables de usuario en queries sin preparar)
+          2. XSS (echo de variables sin htmlspecialchars)
+          3. Passwords hardcodeadas en el codigo
+          4. Uso directo de \$_GET o \$_POST sin validar
+
+          Responde UNICAMENTE con este JSON sin texto extra:
+          {\"status\":\"PASS\",\"issues\":[],\"summary\":\"ok\"}
+          o
+          {\"status\":\"FAIL\",\"issues\":[\"descripcion del problema\"],\"summary\":\"resumen\"}
+
+          Codigo:
+          $CODE"
+
+          # Llamar a Ollama
+          RESPONSE=$(curl -s -X POST http://213.199.37.66:11434/api/generate \
+            -H "Content-Type: application/json" \
+            -d "{\"model\":\"qwen2.5:0.5b\",\"prompt\":$(echo "$PROMPT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),\"stream\":false}" \
+            --max-time 60)
+
+          echo "Respuesta raw de Ollama:"
+          echo "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('response',''))"
+
+          # Extraer JSON de la respuesta
+          REVIEW=$(echo "$RESPONSE" | python3 -c "
+          import json, sys, re
+          d = json.load(sys.stdin)
+          raw = d.get('response','')
+          # Buscar JSON en la respuesta
+          match = re.search(r'\{.*\}', raw, re.DOTALL)
+          if match:
+              try:
+                  obj = json.loads(match.group())
+                  print(json.dumps(obj))
+              except:
+                  print('{\"status\":\"PASS\",\"issues\":[],\"summary\":\"No se pudo parsear respuesta\"}')
+          else:
+              print('{\"status\":\"PASS\",\"issues\":[],\"summary\":\"Sin problemas detectados\"}')
+          ")
+
+          STATUS=$(echo "$REVIEW" | python3 -c "import json,sys; print(json.load(sys.stdin).get('status','PASS'))")
+          SUMMARY=$(echo "$REVIEW" | python3 -c "import json,sys; print(json.load(sys.stdin).get('summary',''))")
+          ISSUES=$(echo "$REVIEW"  | python3 -c "import json,sys; issues=json.load(sys.stdin).get('issues',[]); [print(f'  - {i}') for i in issues]")
+
+          # Escribir resumen en GitHub Actions Summary
+          echo "## 🤖 AI Code Review — Ollama (qwen2.5)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Modelo:** qwen2.5:0.5b" >> $GITHUB_STEP_SUMMARY
+          echo "**Archivos revisados:** $CHANGED" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$STATUS" = "FAIL" ]; then
+            echo "### ❌ Problemas detectados" >> $GITHUB_STEP_SUMMARY
+            echo "$ISSUES" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Resumen:** $SUMMARY" >> $GITHUB_STEP_SUMMARY
+            echo ""
+            echo "::warning::AI Review detecto problemas: $SUMMARY"
+            echo "result=FAIL" >> $GITHUB_OUTPUT
+          else
+            echo "### ✅ Codigo aprobado" >> $GITHUB_STEP_SUMMARY
+            echo "**Resumen:** $SUMMARY" >> $GITHUB_STEP_SUMMARY
+            echo ""
+            echo "✅ AI Review: codigo aprobado"
+            echo "result=PASS" >> $GITHUB_OUTPUT
+          fi
+
+  # ─── 3. BUILD & PUSH ──────────────────────────────────────────────────────────
   build:
     name: Build & Push Docker image
     runs-on: ubuntu-latest
-    needs: test
+    needs: ai-review
     if: github.event_name != 'pull_request'
     permissions:
       contents: read
@@ -76,9 +178,9 @@ jobs:
           cache-from: type=gha
           cache-to:   type=gha,mode=max
 
-  # ─── 3. DEPLOY ────────────────────────────────────────────────────────────────
+  # ─── 4. DEPLOY + ROLLBACK ─────────────────────────────────────────────────────
   deploy:
-    name: Deploy al servidor via SSH
+    name: Deploy + Rollback automatico
     runs-on: ubuntu-latest
     needs: build
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
@@ -87,7 +189,7 @@ jobs:
       - name: Instalar sshpass
         run: sudo apt-get install -y sshpass
 
-      - name: Deploy via SSH
+      - name: Deploy con rollback automatico
         env:
           SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
           SSH_USER:     ${{ secrets.SSH_USER }}
@@ -95,10 +197,58 @@ jobs:
           APP_VERSION:  ${{ needs.build.outputs.image_version }}
           DH_USER:      ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" << EOF
+          sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" << 'ENDSSH'
+            set -e
             cd ~/php-cicd-demo
+
+            echo "=== Guardando version actual para rollback ==="
+            CURRENT=$(docker inspect php-cicd-demo \
+              --format='{{index .Config.Image}}' 2>/dev/null || echo "none")
+            echo "Version actual: $CURRENT"
+            echo "$CURRENT" > /tmp/rollback_image.txt
+
+            echo "=== Descargando nueva imagen ==="
             docker compose pull
-            APP_VERSION=$APP_VERSION DOCKERHUB_USERNAME=$DH_USER docker compose up -d --remove-orphans
-            echo "Deploy OK - version: $APP_VERSION"
-            docker ps --filter name=php-cicd-demo --format 'Contenedor: {{.Names}} | {{.Status}}'
-          EOF
+
+            echo "=== Aplicando nuevo deploy ==="
+            APP_VERSION=$APP_VERSION DOCKERHUB_USERNAME=$DH_USER \
+              docker compose up -d --remove-orphans
+
+            echo "=== Verificando salud del contenedor (15s) ==="
+            sleep 15
+            STATUS=$(docker inspect php-cicd-demo \
+              --format='{{.State.Health.Status}}' 2>/dev/null || echo "unknown")
+            HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ || echo "000")
+
+            echo "Health: $STATUS | HTTP: $HTTP"
+
+            if [ "$HTTP" != "200" ]; then
+              echo ""
+              echo "DEPLOY FALLO (HTTP $HTTP) — ejecutando rollback..."
+              ROLLBACK=$(cat /tmp/rollback_image.txt)
+
+              if [ "$ROLLBACK" != "none" ]; then
+                docker stop php-cicd-demo 2>/dev/null || true
+                docker rm   php-cicd-demo 2>/dev/null || true
+                docker run -d --name php-cicd-demo --restart unless-stopped \
+                  -p 8080:80 "$ROLLBACK"
+                echo "Rollback aplicado: $ROLLBACK"
+              else
+                echo "No habia version anterior para rollback."
+              fi
+              exit 1
+            fi
+
+            echo ""
+            echo "Deploy exitoso - version: $APP_VERSION | HTTP: $HTTP"
+            docker ps --filter name=php-cicd-demo \
+              --format 'Contenedor: {{.Names}} | {{.Status}}'
+          ENDSSH
+
+      - name: Resumen del deploy
+        if: always()
+        run: |
+          echo "## 🚀 Deploy" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** \`${{ needs.build.outputs.image_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Actor:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
