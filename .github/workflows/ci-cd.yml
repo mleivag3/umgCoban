@@ -48,14 +48,14 @@ jobs:
       - name: Login a Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Generar tags automaticos
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ vars.DOCKERHUB_USERNAME }}/php-cicd-demo
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/php-cicd-demo
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -93,7 +93,7 @@ jobs:
           SSH_USER:     ${{ secrets.SSH_USER }}
           SSH_HOST:     ${{ secrets.SSH_HOST }}
           APP_VERSION:  ${{ needs.build.outputs.image_version }}
-          DH_USER:      ${{ vars.DOCKERHUB_USERNAME }}
+          DH_USER:      ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" << EOF
             cd ~/php-cicd-demo
