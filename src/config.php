@@ -1,6 +1,6 @@
 <?php
 define('APP_NAME', 'Demo CI/CD');
-define('APP_VERSION', getenv('APP_VERSION') ?: '1.0.0');
+define('APP_VERSION', getenv('APP_VERSION') ?: '1.1.0');
 define('BUILD_DATE', getenv('BUILD_DATE') ?: date('Y-m-d'));
 
 define('USERS', [
