@@ -200,10 +200,6 @@ jobs:
         run: |
           SSH="sshpass -p $SSH_PASSWORD ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST"
 
-          echo "=== Step 1: Docker login en servidor ==="
-          $SSH "echo ${DH_TOKEN} | docker login -u ${DH_USER} --password-stdin"
-
-          echo "=== Step 2: Deploy con rollback ==="
           $SSH "
             set -e
             cd /root/php-cicd-demo
@@ -213,7 +209,7 @@ jobs:
             echo \$CURRENT > /tmp/rollback_image.txt
             echo \"Version anterior: \$CURRENT\"
 
-            echo '--- Pull nueva imagen ---'
+            echo '--- Pull nueva imagen (repo publico, sin login) ---'
             APP_VERSION=${APP_VERSION} DOCKERHUB_USERNAME=${DH_USER} docker compose pull
 
             echo '--- Aplicando deploy ---'
